@@ -1,6 +1,9 @@
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
-.beads/proxieddb/
+.build/
+dist/
+.DS_Store
+.swiftpm/
+*.xcuserstate
+.beads/dolt/
+.beads/*.lock
+.beads/*.pid
+.beads/*.log
