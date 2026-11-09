@@ -12,15 +12,28 @@ private enum Editor: Identifiable {
     }
 }
 
+private enum SystemSelection: Hashable {
+    case all
+    case node(String)
+}
+
 struct DirectoryView: View {
     @Bindable var model: AppModel
     @State private var editor: Editor?
+    private var systemSelection: Binding<SystemSelection> {
+        Binding(get: { model.selectedNode.map(SystemSelection.node) ?? .all }, set: {
+            switch $0 {
+            case .all: model.selectedNode = nil
+            case .node(let origin): model.selectedNode = origin
+            }
+        })
+    }
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 connectionSelector
-                List(selection: $model.selectedNode) {
-                    Label("All services", systemImage: "square.grid.2x2").tag(Optional<String>.none)
+                List(selection: systemSelection) {
+                    Label("All services", systemImage: "square.grid.2x2").tag(SystemSelection.all)
                     Section("Federation") {
                         ForEach(model.origins, id: \.self) { origin in
                             HStack {
@@ -35,7 +48,7 @@ struct DirectoryView: View {
                                 Spacer()
                                 Text("\(model.services.filter { $0.origin == origin }.count)")
                                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            }.tag(Optional(origin))
+                            }.tag(SystemSelection.node(origin))
                         }
                     }
                 }.listStyle(.sidebar)
@@ -88,6 +101,13 @@ struct DirectoryView: View {
             }
         }
         .toolbar {
+            ToolbarItem {
+                if model.selectedNode != nil {
+                    Button { model.selectedNode = nil } label: {
+                        Label("All services", systemImage: "square.grid.2x2")
+                    }.help("Show services from every system")
+                }
+            }
             ToolbarItem {
                 if model.loading { ProgressView().controlSize(.small) }
                 else { Button { Task { await model.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") } }
@@ -159,7 +179,7 @@ private struct ServiceRow: View {
                 HStack {
                     Text(service.origin ?? "Local")
                     Spacer()
-                    Text(health).foregroundStyle(health == "Up" ? .green : health == "Down" ? .orange : .secondary)
+                    Text(health).foregroundStyle(health == "Up" ? .green : ["Down", "Certificate error", "HTTPS error"].contains(health) ? .orange : .secondary)
                 }.font(.caption)
             }
         }
@@ -169,6 +189,12 @@ private struct ServiceRow: View {
 private struct ServiceDetail: View {
     let service: DirectoryService
     @State private var openedURL: URL?
+    @State private var presentation: ServicePresentation
+    @State private var detectedJSONURL: URL?
+    init(service: DirectoryService) {
+        self.service = service
+        _presentation = State(initialValue: service.view_kind == "json" ? .json : service.view_kind == "iframe" ? .web : .auto)
+    }
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
@@ -187,7 +213,8 @@ private struct ServiceDetail: View {
                 if let description = service.description, !description.isEmpty { Text(description).font(.callout) }
                 HStack {
                     if let url = service.preferredURL {
-                        Button("Open Service") { openedURL = url }.buttonStyle(.borderedProminent)
+                        Button(service.view_kind == "json" ? "Open JSON" : "Open Service") { openedURL = url }
+                            .buttonStyle(.borderedProminent)
                     }
                     if !service.links.isEmpty {
                         Menu("Addresses") {
@@ -199,14 +226,36 @@ private struct ServiceDetail: View {
                     if let docs = service.docs_url.flatMap(URLPolicy.webURL) {
                         Link("Documentation", destination: docs)
                     }
+                    Spacer()
+                    if openedURL != nil {
+                        Picker("Service viewer", selection: $presentation) {
+                            Text("Auto").tag(ServicePresentation.auto)
+                            Text("JSON").tag(ServicePresentation.json)
+                            Text("Web").tag(ServicePresentation.web)
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                    }
                 }
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             Divider()
-            if let url = openedURL { ServiceBrowser(url: url).id(url) }
+            if let url = openedURL {
+                if presentation == .json || (presentation == .auto && detectedJSONURL != nil) {
+                    JSONServiceView(url: detectedJSONURL ?? url, refreshSeconds: service.view_refresh_seconds)
+                        .id(detectedJSONURL ?? url)
+                } else {
+                    ServiceBrowser(url: url, onJSON: presentation == .auto ? { detectedJSONURL = $0 } : nil)
+                        .id("\(presentation):\(url.absoluteString)")
+                }
+            }
             else {
-                ContentUnavailableView("Open \(service.name)", systemImage: "globe",
-                    description: Text("Sign in to this service once. The app retains its website session across launches, until the service expires it."))
+                ContentUnavailableView("Open \(service.name)", systemImage: service.view_kind == "json" ? "curlybraces" : "globe",
+                    description: Text(service.view_kind == "json"
+                        ? "Explore the JSON response, search its fields, and watch updates at the service’s configured refresh interval."
+                        : "Sign in to this service once. The app retains its website session across launches, until the service expires it."))
             }
         }
+        .onChange(of: openedURL) { _, _ in detectedJSONURL = nil }
+        .onChange(of: presentation) { _, _ in detectedJSONURL = nil }
     }
 }
+
+private enum ServicePresentation: Hashable { case auto, json, web }

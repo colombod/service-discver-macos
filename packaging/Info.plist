@@ -6,8 +6,8 @@
     <key>CFBundleDisplayName</key><string>Service Discovery</string>
     <key>CFBundleExecutable</key><string>ServiceDiscovery</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>0.1.4</string>
+    <key>CFBundleVersion</key><string>5</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
@@ -19,8 +19,8 @@
     <key>SURequireSignedFeed</key><true/>
     <key>NSLocalNetworkUsageDescription</key><string>Connect to your Service Directory nodes and hosted services on your local network.</string>
     <key>NSAppTransportSecurity</key><dict>
-        <key>NSAllowsLocalNetworking</key><true/>
+        <!-- Explicitly registered HTTP services must work in URLSession as well
+             as WebKit. Fine-grained ATS keys override this global setting. -->
         <key>NSAllowsArbitraryLoads</key><true/>
-        <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
     </dict>
 </dict></plist>
