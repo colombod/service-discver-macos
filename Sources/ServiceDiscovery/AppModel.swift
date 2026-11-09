@@ -6,7 +6,7 @@ final class AppModel {
     var preferences = Preferences()
     var services: [DirectoryService] = []
     var nodes: [FederationNode] = []
-    var health: [String: String] = [:]
+    var health: [String: [String: String]] = [:]
     var localOrigin: String?
     var selectedNode: String?
     var selectedService: String?
@@ -89,10 +89,28 @@ final class AppModel {
             services = newServices; nodes = newNodes; localOrigin = info.name
             error = nil; lastRefresh = Date()
             if let id = selectedService, !services.contains(where: { $0.id == id }) { selectedService = nil }
-            // /api/health describes only the directory's OWN services. Never apply it to peer namesakes.
-            let newHealth = try? await api.fetch([String: String].self, base: base, path: "api/health", token: credential)
+            func serviceURLs(for origin: String) -> [String: URL] {
+                Dictionary(newServices.filter { ($0.origin ?? info.name) == origin }.compactMap { service in
+                    service.healthProbeURL.map { (service.name, $0) }
+                }, uniquingKeysWith: { first, _ in first })
+            }
+            var targets = [HealthTarget(origin: info.name, deviceID: info.device_id, base: base, token: credential,
+                                        serviceURLs: serviceURLs(for: info.name))]
+            let groupedNodes = Dictionary(grouping: newNodes, by: \.name)
+            for node in newNodes where node.name != info.name && groupedNodes[node.name]?.count == 1 {
+                guard let peerBase = try? URLPolicy.baseURL(node.base_url) else { continue }
+                let saved = preferences.connections.first {
+                    guard let savedBase = try? URLPolicy.baseURL($0.address) else { return false }
+                    return HealthTarget.credentialKey(savedBase) == HealthTarget.credentialKey(peerBase)
+                }
+                // A gated peer needs its OWN saved credential. Never forward the entry node's token.
+                let peerToken = saved.flatMap { try? token($0) }
+                targets.append(HealthTarget(origin: node.name, deviceID: node.device_id, base: peerBase, token: peerToken,
+                                            serviceURLs: serviceURLs(for: node.name)))
+            }
+            let newHealth = await FederationHealth.fetch(targets, api: api)
             guard connection.id == self.connection?.id, refreshID == requestID else { return }
-            health = newHealth ?? [:]
+            health = newHealth
         } catch is CancellationError { }
         catch {
             guard connection.id == self.connection?.id, refreshID == requestID else { return }
@@ -100,10 +118,13 @@ final class AppModel {
         }
     }
     func healthLabel(_ service: DirectoryService) -> String {
-        guard service.origin == localOrigin else { return "Health unknown" }
-        switch health[service.name] {
+        guard let origin = service.origin ?? localOrigin else { return "Health unknown" }
+        switch health[origin]?[service.name] {
         case "up": return "Up"
         case "down": return "Down"
+        case "tls_error": return "Certificate error"
+        case "tls_failed": return "HTTPS error"
+        case "signin": return "Sign-in required"
         default: return "Health unknown"
         }
     }

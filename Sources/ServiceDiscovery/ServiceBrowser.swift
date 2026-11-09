@@ -2,14 +2,16 @@ import SwiftUI
 import WebKit
 import DirectoryCore
 
-@MainActor @Observable
-private final class BrowserSession: NSObject, WKNavigationDelegate, WKUIDelegate {
+@MainActor
+private final class BrowserSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
-    var error: String?
-    var address = ""
-    var loading = false
+    @Published var error: String?
+    @Published var address = ""
+    @Published var loading = false
+    private let onJSON: ((URL) -> Void)?
     private var popups: [NSWindow] = []
-    init(url: URL) {
+    init(url: URL, onJSON: ((URL) -> Void)?) {
+        self.onJSON = onJSON
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         webView = WKWebView(frame: .zero, configuration: config)
@@ -43,6 +45,16 @@ private final class BrowserSession: NSObject, WKNavigationDelegate, WKUIDelegate
             decisionHandler(.cancel)
         }
     }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if webView === self.webView, navigationResponse.isForMainFrame,
+           JSONMediaType.matches(navigationResponse.response.mimeType),
+           let url = navigationResponse.response.url, URLPolicy.webURL(url.absoluteString) != nil,
+           let onJSON {
+            onJSON(url)
+            decisionHandler(.cancel)
+        } else { decisionHandler(.allow) }
+    }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         // OAuth popup flows need a real child window and the supplied configuration.
@@ -60,8 +72,11 @@ private final class BrowserSession: NSObject, WKNavigationDelegate, WKUIDelegate
 
 struct ServiceBrowser: View {
     let url: URL
-    @State private var session: BrowserSession
-    init(url: URL) { self.url = url; _session = State(initialValue: BrowserSession(url: url)) }
+    @StateObject private var session: BrowserSession
+    init(url: URL, onJSON: ((URL) -> Void)? = nil) {
+        self.url = url
+        _session = StateObject(wrappedValue: BrowserSession(url: url, onJSON: onJSON))
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack {

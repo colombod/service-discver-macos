@@ -27,9 +27,12 @@ public struct DirectoryService: Codable, Identifiable, Hashable, Sendable {
     public var docs_url: String?
     public var view_url: String?
     public var view_kind: String?
+    public var view_refresh_seconds: Int?
+    public var health_url: String?
     // JSON encoding avoids collisions when either component contains a separator.
     public var id: String { String(data: try! JSONEncoder().encode([origin ?? "", name]), encoding: .utf8)! }
     public var preferredURL: URL? { view_url.flatMap(URLPolicy.webURL) ?? links.compactMap(\.webURL).first }
+    public var healthProbeURL: URL? { health_url.flatMap(URLPolicy.webURL) ?? preferredURL }
 }
 
 public struct FederationNode: Codable, Identifiable, Hashable, Sendable {
